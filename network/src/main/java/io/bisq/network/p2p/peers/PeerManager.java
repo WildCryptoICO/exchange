@@ -159,12 +159,12 @@ public class PeerManager implements ConnectionListener, PersistedDataHost {
     // Modify this to change the relationships between connection limits.
     // maxConnections default 12
     private void setConnectionLimits(int maxConnections) {
-        this.maxConnections = maxConnections;                       // 12
-        disconnectFromSeedNode = Math.min(6, maxConnections + 1);   // 6
-        minConnections = Math.max(1, maxConnections - 4);           // 1-8
-        maxConnectionsPeer = maxConnections + 4;                    // 16
-        maxConnectionsNonDirect = maxConnections + 8;               // 20
-        maxConnectionsAbsolute = maxConnections + 18;               // 30 -> seedNode with maxConnections=30 -> 48
+        this.maxConnections = maxConnections;                                                     // app node 12; seedNode 30
+        disconnectFromSeedNode = Math.min(6, maxConnections + 1);                                 // 6
+        minConnections = Math.max(1, (int) Math.round(maxConnections * 0.7));                     // app node 1-8; seedNode 21
+        maxConnectionsPeer = Math.max(4, (int) Math.round(maxConnections * 1.3));                 // app node 16; seedNode 39
+        maxConnectionsNonDirect = Math.max(8, (int) Math.round(maxConnections * 1.7));            // app node 20; seedNode 51
+        maxConnectionsAbsolute = Math.max(12, (int) Math.round(maxConnections * 2.5));            // app node 30; seedNode 66
     }
 
     ///////////////////////////////////////////////////////////////////////////////////////////
@@ -265,10 +265,10 @@ public class PeerManager implements ConnectionListener, PersistedDataHost {
         Log.traceCall("maxConnections=" + maxConnections);
         Set<Connection> allConnections = networkNode.getAllConnections();
         int size = allConnections.size();
-        log.debug("We have {} connections open. Our limit is {}", size, maxConnections);
+        log.info("We have {} connections open. Our limit is {}", size, maxConnections);
 
         if (size > maxConnections) {
-            log.debug("We have too many connections open.\n\t" +
+            log.info("We have too many connections open.\n\t" +
                     "Lets try first to remove the inbound connections of type PEER.");
             List<Connection> candidates = allConnections.stream()
                     .filter(e -> e instanceof InboundConnection)
@@ -279,7 +279,7 @@ public class PeerManager implements ConnectionListener, PersistedDataHost {
                 log.debug("No candidates found. We check if we exceed our " +
                         "maxConnectionsPeer limit of {}", maxConnectionsPeer);
                 if (size > maxConnectionsPeer) {
-                    log.debug("Lets try to remove ANY connection of type PEER.");
+                    log.info("Lets try to remove ANY connection of type PEER.");
                     candidates = allConnections.stream()
                             .filter(e -> e.getPeerType() == Connection.PeerType.PEER)
                             .collect(Collectors.toList());
@@ -288,7 +288,7 @@ public class PeerManager implements ConnectionListener, PersistedDataHost {
                         log.debug("No candidates found. We check if we exceed our " +
                                 "maxConnectionsNonDirect limit of {}", maxConnectionsNonDirect);
                         if (size > maxConnectionsNonDirect) {
-                            log.debug("Lets try to remove any connection which is not of type DIRECT_MSG_PEER or INITIAL_DATA_REQUEST.");
+                            log.info("Lets try to remove any connection which is not of type DIRECT_MSG_PEER or INITIAL_DATA_REQUEST.");
                             candidates = allConnections.stream()
                                     .filter(e -> e.getPeerType() != Connection.PeerType.DIRECT_MSG_PEER && e.getPeerType() != Connection.PeerType.INITIAL_DATA_REQUEST)
                                     .collect(Collectors.toList());
@@ -297,7 +297,7 @@ public class PeerManager implements ConnectionListener, PersistedDataHost {
                                 log.debug("No candidates found. We check if we exceed our " +
                                         "maxConnectionsAbsolute limit of {}", maxConnectionsAbsolute);
                                 if (size > maxConnectionsAbsolute) {
-                                    log.debug("Lets try to remove any connection.");
+                                    log.info("We reached abs. max. connections. Lets try to remove ANY connection.");
                                     candidates = allConnections.stream().collect(Collectors.toList());
                                 }
                             }
@@ -308,8 +308,8 @@ public class PeerManager implements ConnectionListener, PersistedDataHost {
 
             if (!candidates.isEmpty()) {
                 candidates.sort((o1, o2) -> ((Long) o1.getStatistic().getLastActivityTimestamp()).compareTo(((Long) o2.getStatistic().getLastActivityTimestamp())));
-                log.debug("Candidates.size() for shut down=" + candidates.size());
                 Connection connection = candidates.remove(0);
+                log.info("checkMaxConnections: Num candidates for shut down={}. We close oldest connection: {}", candidates.size(), connection);
                 log.debug("We are going to shut down the oldest connection.\n\tconnection=" + connection.toString());
                 if (!connection.isStopped())
                     connection.shutDown(CloseConnectionReason.TOO_MANY_CONNECTIONS_OPEN, () -> UserThread.runAfter(this::checkMaxConnections, 100, TimeUnit.MILLISECONDS));
