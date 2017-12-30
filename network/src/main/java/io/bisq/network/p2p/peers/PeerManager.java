@@ -38,8 +38,12 @@ public class PeerManager implements ConnectionListener, PersistedDataHost {
 
     private static final int MAX_REPORTED_PEERS = 1000;
     private static final int MAX_PERSISTED_PEERS = 500;
-    private static final long MAX_AGE = TimeUnit.DAYS.toMillis(14); // max age for reported peers is 14 days
+    // max age for reported peers is 14 days
+    private static final long MAX_AGE = TimeUnit.DAYS.toMillis(14);
+    // Age of what we consider connected peers still as live peers
+    private static final long MAX_AGE_LIVE_PEERS = TimeUnit.MINUTES.toMillis(30);
     private static final boolean PRINT_REPORTED_PEERS_DETAILS = true;
+    private Set<Peer> latestLivePeers = new HashSet<>();
 
 
     ///////////////////////////////////////////////////////////////////////////////////////////
@@ -399,7 +403,7 @@ public class PeerManager implements ConnectionListener, PersistedDataHost {
         return reportedPeers;
     }
 
-    public void addToReportedPeers(HashSet<Peer> reportedPeersToAdd, Connection connection) {
+    public void addToReportedPeers(Set<Peer> reportedPeersToAdd, Connection connection) {
         printNewReportedPeers(reportedPeersToAdd);
 
         // We check if the reported msg is not violating our rules
@@ -455,7 +459,7 @@ public class PeerManager implements ConnectionListener, PersistedDataHost {
         }
     }
 
-    private void printNewReportedPeers(HashSet<Peer> reportedPeers) {
+    private void printNewReportedPeers(Set<Peer> reportedPeers) {
         //noinspection ConstantConditions
         if (PRINT_REPORTED_PEERS_DETAILS) {
             StringBuilder result = new StringBuilder("We received new reportedPeers:");
@@ -604,10 +608,20 @@ public class PeerManager implements ConnectionListener, PersistedDataHost {
                 .ifPresent(connection -> connection.shutDown(closeConnectionReason));
     }
 
-    public HashSet<Peer> getConnectedNonSeedNodeReportedPeers(NodeAddress excludedNodeAddress) {
-        return new HashSet<>(getConnectedNonSeedNodeReportedPeers().stream()
+    // Delivers the live peers from the last 30 min (MAX_AGE_LIVE_PEERS)
+    // We include older peers to avoid risks for network partitioning
+    public Set<Peer> getLivePeers(NodeAddress excludedNodeAddress) {
+        Set<Peer> currentLivePeers = new HashSet<>(getConnectedReportedPeers().stream()
+                .filter(e -> !isSeedNode(e))
                 .filter(e -> !e.getNodeAddress().equals(excludedNodeAddress))
                 .collect(Collectors.toSet()));
+        latestLivePeers.addAll(currentLivePeers);
+        long maxAge = new Date().getTime() - MAX_AGE_LIVE_PEERS;
+        latestLivePeers = latestLivePeers.stream()
+                .filter(peer -> peer.getDate().getTime() > maxAge)
+                .collect(Collectors.toSet());
+        log.info("Num of latestLivePeers={}, latestLivePeers={}", latestLivePeers.size(), latestLivePeers);
+        return latestLivePeers;
     }
 
     ///////////////////////////////////////////////////////////////////////////////////////////
@@ -620,12 +634,6 @@ public class PeerManager implements ConnectionListener, PersistedDataHost {
         return networkNode.getConfirmedConnections().stream()
                 .map(c -> new Peer(c.getPeersNodeAddressOptional().get()))
                 .collect(Collectors.toSet());
-    }
-
-    private HashSet<Peer> getConnectedNonSeedNodeReportedPeers() {
-        return new HashSet<>(getConnectedReportedPeers().stream()
-                .filter(e -> !isSeedNode(e))
-                .collect(Collectors.toSet()));
     }
 
     private void stopCheckMaxConnectionsTimer() {
